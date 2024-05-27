@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -75,56 +77,74 @@ type arguments struct {
 const API_URL = "https://api.llama-api.com/chat/completions"
 
 // Get generated response from Llama API
-func getGeneratedResponse(prompt string) string {
+func getGeneratedResponse(prompt string) (string, error) {
 	//Create request body
 	chatReq := createChatRequest(prompt)
 
 	//Marshal Go struct into Json
 	jsonData, err := json.Marshal(chatReq)
 	if err != nil {
-		log.Fatalf("Failed to marshal json: %v", err)
+		log.Printf("Failed to Marshal: %v", err)
+		return "", err
 	}
 
 	//Create Http request struct with request method, endpoint and request body
 	ctx := context.Background()
 	req, err := http.NewRequestWithContext(ctx, "POST", API_URL, bytes.NewReader(jsonData))
 	if err != nil {
-		log.Fatalf("Failed to create http request struct: %v", err)
+		log.Printf("Failed to create http request struct: %v", err)
+		return "", err
 	}
 
 	//Add necessary headers, including the API key for authorization
 	apiKey := os.Getenv("LLAMA_API_KEY")
 	if apiKey == "" {
-		log.Fatal("LLAMA_API_KEY environment variable is not set")
+		err := errors.New("LLAMA_API_KEY environment variable is not set")
+		log.Printf("Failed to get API KEY: %v", err)
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	//Execute http request to llama
+	//Execute http request to llama and get response
 	client := &http.Client{}
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("Failed to get http response: %v", err)
+		log.Printf("Failed to get http response: %v", err)
+		return "", err
 	}
 
+	//Check if http status code is ok
 	if res.StatusCode != http.StatusOK {
-		log.Fatalf("Unexpected status code: %v", res.Status)
+		err := errors.New("Unexpected status code")
+		log.Printf("Failed to get expected status code: %v :%d", err, res.StatusCode)
+		return "", err
 	}
 
-	//Decode http response body into Go struct
+	//Read http response body
 	defer res.Body.Close()
-	chatRes := &chatResponse{}
-	err = json.NewDecoder(res.Body).Decode(chatRes)
+	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		log.Fatalf("Failed to decode: %v", err)
+		log.Printf("Failed to read body: %v", err)
+		return "", err
+	}
+
+	//Unmarshal json response into Go struct
+	chatRes := &chatResponse{}
+	err = json.Unmarshal(body, chatRes)
+	if err != nil {
+		log.Printf("Failed to decode: %v", err)
+		return "", err
 	}
 
 	if len(chatRes.Choices) == 0 {
-		log.Fatal("No choices returned from llama")
+		err := errors.New("No choices returned from llama")
+		log.Printf("Failed to get expected length of choices: %v", err)
+		return "", err
 	}
 
 	//Return generated text from llama
-	return chatRes.Choices[0].Message.Content
+	return chatRes.Choices[0].Message.Content, nil
 }
 
 // Set a prompt and other values to create chat request
@@ -170,7 +190,11 @@ func main() {
 	fmt.Println("")
 
 	fmt.Println("++++++ Generated response ++++++")
-	fmt.Println(getGeneratedResponse(prompt))
+	response, err := getGeneratedResponse(prompt)
+	if err != nil {
+		log.Fatalf("Failed to get generated response from Llama API: %v", err)
+	}
+	fmt.Println(response)
 
 	fmt.Println("")
 	fmt.Println("")
