@@ -133,7 +133,7 @@ func getGeneratedResponse(prompt string) (string, error) {
 	chatRes := &chatResponse{}
 	err = json.Unmarshal(body, chatRes)
 	if err != nil {
-		log.Printf("Failed to decode: %v", err)
+		log.Printf("Failed to unmarshal: %v", err)
 		return "", err
 	}
 
